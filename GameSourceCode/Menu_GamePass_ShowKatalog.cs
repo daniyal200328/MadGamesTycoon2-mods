@@ -1,0 +1,205 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class Menu_GamePass_ShowKatalog : MonoBehaviour
+{
+	private mainScript mS_;
+
+	private GameObject main_;
+
+	private GUI_Main guiMain_;
+
+	private sfxScript sfx_;
+
+	private textScript tS_;
+
+	private genres genres_;
+
+	private games games_;
+
+	private platformScript pS_;
+
+	public GameObject[] uiPrefabs;
+
+	public GameObject[] uiObjects;
+
+	private void Start()
+	{
+		FindScripts();
+	}
+
+	private void FindScripts()
+	{
+		if (!main_)
+		{
+			main_ = GameObject.FindWithTag("Main");
+		}
+		if (!mS_)
+		{
+			mS_ = main_.GetComponent<mainScript>();
+		}
+		if (!guiMain_)
+		{
+			guiMain_ = GameObject.Find("CanvasInGameMenu").GetComponent<GUI_Main>();
+		}
+		if (!sfx_)
+		{
+			sfx_ = GameObject.Find("SFX").GetComponent<sfxScript>();
+		}
+		if (!tS_)
+		{
+			tS_ = main_.GetComponent<textScript>();
+		}
+		if (!genres_)
+		{
+			genres_ = main_.GetComponent<genres>();
+		}
+		if (!games_)
+		{
+			games_ = main_.GetComponent<games>();
+		}
+	}
+
+	private void Update()
+	{
+		if (uiObjects[2].GetComponent<Animation>().IsPlaying("openMenu"))
+		{
+			uiObjects[3].GetComponent<Scrollbar>().value = 1f;
+		}
+	}
+
+	private bool Exists(GameObject parent_, int id_)
+	{
+		for (int i = 0; i < parent_.transform.childCount; i++)
+		{
+			if (parent_.transform.GetChild(i).GetComponent<Item_MyGames_Review>().game_.myID == id_)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public void InitDropdowns()
+	{
+		FindScripts();
+		int value = PlayerPrefs.GetInt(uiObjects[1].name);
+		List<string> list = new List<string>();
+		list.Add(tS_.GetText(183));
+		list.Add(tS_.GetText(217));
+		list.Add(tS_.GetText(273));
+		list.Add(tS_.GetText(275));
+		list.Add(tS_.GetText(1290));
+		list.Add(tS_.GetText(1289));
+		uiObjects[1].GetComponent<Dropdown>().ClearOptions();
+		uiObjects[1].GetComponent<Dropdown>().AddOptions(list);
+		uiObjects[1].GetComponent<Dropdown>().value = value;
+	}
+
+	public void Init(platformScript plat_)
+	{
+		FindScripts();
+		pS_ = plat_;
+		uiObjects[6].GetComponent<Text>().text = pS_.GetName();
+		InitDropdowns();
+		SetData();
+	}
+
+	private void SetData()
+	{
+		for (int i = 0; i < games_.arrayGamesScripts.Length; i++)
+		{
+			if ((bool)games_.arrayGamesScripts[i] && CheckGameData_InPass(games_.arrayGamesScripts[i]) && !Exists(uiObjects[0], games_.arrayGamesScripts[i].myID))
+			{
+				Item_MyGames_Review component = Object.Instantiate(uiPrefabs[0], new Vector3(0f, 0f, 0f), Quaternion.identity, uiObjects[0].transform).GetComponent<Item_MyGames_Review>();
+				component.mS_ = mS_;
+				component.tS_ = tS_;
+				component.sfx_ = sfx_;
+				component.guiMain_ = guiMain_;
+				component.genres_ = genres_;
+				component.game_ = games_.arrayGamesScripts[i];
+			}
+		}
+		DROPDOWN_Sort();
+		guiMain_.KeinEintrag(uiObjects[0], uiObjects[5]);
+		string text = tS_.GetText(297);
+		text = text.Replace("<NUM>", uiObjects[0].transform.childCount.ToString());
+		uiObjects[4].GetComponent<Text>().text = text;
+	}
+
+	public bool CheckGameData_InPass(gameScript script_)
+	{
+		if ((bool)script_ && script_.inGamePass && script_.CanBeInGamePass())
+		{
+			if (script_.gamePlatform[0] == pS_.myID)
+			{
+				return true;
+			}
+			if (script_.gamePlatform[1] == pS_.myID)
+			{
+				return true;
+			}
+			if (script_.gamePlatform[2] == pS_.myID)
+			{
+				return true;
+			}
+			if (script_.gamePlatform[3] == pS_.myID)
+			{
+				return true;
+			}
+			if (script_.IsKonsoleAbwaertskompatibel(pS_))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public void BUTTON_Close()
+	{
+		sfx_.PlaySound(3, force: true);
+		base.gameObject.SetActive(value: false);
+	}
+
+	public void DROPDOWN_Sort()
+	{
+		int value = uiObjects[1].GetComponent<Dropdown>().value;
+		PlayerPrefs.SetInt(uiObjects[1].name, value);
+		int childCount = uiObjects[0].transform.childCount;
+		for (int i = 0; i < childCount; i++)
+		{
+			GameObject gameObject = uiObjects[0].transform.GetChild(i).gameObject;
+			if ((bool)gameObject)
+			{
+				Item_MyGames_Review component = gameObject.GetComponent<Item_MyGames_Review>();
+				switch (value)
+				{
+				case 0:
+					gameObject.name = component.game_.GetNameSimple();
+					break;
+				case 1:
+				{
+					float num = component.game_.date_month;
+					num /= 13f;
+					gameObject.name = component.game_.date_year.ToString() + num;
+					break;
+				}
+				case 2:
+					gameObject.name = component.game_.maingenre.ToString();
+					break;
+				case 3:
+					gameObject.name = component.game_.sellsTotal.ToString();
+					break;
+				case 4:
+					gameObject.name = component.game_.reviewTotal.ToString();
+					break;
+				case 5:
+					gameObject.name = component.game_.GetUserReviewPercent().ToString();
+					break;
+				}
+			}
+		}
+		mS_.SortChildrenByFloat(uiObjects[0]);
+	}
+}
