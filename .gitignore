@@ -1,0 +1,31 @@
+# BepInEx
+BepInEx/
+
+# Build artifacts
+bin/
+obj/
+*.dll
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.sln.iml
+*.csproj.user
+*.suo
+*.vs/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Temp files
+*.tmp
+*.bak
+*.log
+
+# Game data
+Mad Games Tycoon 2_Data/

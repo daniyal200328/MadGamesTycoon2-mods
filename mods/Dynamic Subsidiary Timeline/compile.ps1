@@ -1,13 +1,14 @@
 $ErrorActionPreference = "Stop"
 
 $root = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+$gameRoot = "C:\Users\mdfar\Downloads\Mad.Games.Tycoon.2.Build.20855306\Mad.Games.Tycoon.2.Build.20855306"
 $dotnet = "C:\tmp\dotnet\dotnet.exe"
 $csc = "C:\tmp\dotnet\sdk\8.0.422\Roslyn\bincore\csc.dll"
 $netstandardDir = "C:\tmp\dotnet\packs\NETStandard.Library.Ref\2.1.0\ref\netstandard2.1"
 $src = Join-Path $PSScriptRoot "DynamicSubsidiaryTimelinePlugin.cs"
 $out = Join-Path $root "BepInEx\plugins\DynamicSubsidiaryTimeline.dll"
-$managedDir = Join-Path $root "Mad Games Tycoon 2_Data\Managed"
-$bepCoreDir = Join-Path $root "BepInEx\core"
+$managedDir = Join-Path $gameRoot "Mad Games Tycoon 2_Data\Managed"
+$bepCoreDir = Join-Path $gameRoot "BepInEx\core"
 
 if (!(Test-Path $dotnet) -or !(Test-Path $csc) -or !(Test-Path $netstandardDir)) {
     throw "Missing local .NET SDK files under C:\tmp\dotnet. Reinstall the local SDK before compiling."
@@ -30,9 +31,14 @@ $refs += @(
     (Join-Path $managedDir "UnityEngine.TextRenderingModule.dll"),
     (Join-Path $managedDir "UnityEngine.UIModule.dll"),
     (Join-Path $managedDir "UnityEngine.AnimationModule.dll"),
-    (Join-Path $managedDir "Assembly-CSharp.dll"),
-    (Join-Path $root "BepInEx\plugins\SubsidiaryTeamSlots.dll")
+    (Join-Path $managedDir "Assembly-CSharp.dll")
 )
+
+# Add optional soft dependency if it exists
+$optionalDll = Join-Path $root "BepInEx\plugins\SubsidiaryTeamSlots.dll"
+if (Test-Path $optionalDll) {
+    $refs += $optionalDll
+}
 
 $refArgs = $refs | ForEach-Object { "/r:$_" }
 $args = @(

@@ -19,8 +19,8 @@ public class Subsidiary2Plugin : BaseUnityPlugin
     private bool showCreationMenu;
     private Rect windowRect;
     private string studioName = "My New Studio";
-    private int selectedMarket = 20;
-    private int selectedSpeed;
+    private int selectedMarket = 1;
+    private int selectedSpeed = 1;
     private int selectedCountry;
     private int selectedLogoID;
     private string logoImportPath = "";
@@ -235,8 +235,8 @@ public class Subsidiary2Plugin : BaseUnityPlugin
 
         GUILayout.Space(8);
 
-        GUILayout.Label("Market / Experience (0-100): " + selectedMarket + "  (" + GetStarTier(selectedMarket) + " star tier)");
-        int newMarket = Mathf.Clamp(Mathf.RoundToInt(GUILayout.HorizontalSlider(selectedMarket, 0, 100)), 0, 100);
+        GUILayout.Label("Market / Experience (1-5 stars): " + selectedMarket);
+        int newMarket = Mathf.Clamp(Mathf.RoundToInt(GUILayout.HorizontalSlider(selectedMarket, 1, 5)), 1, 5);
         if (newMarket != selectedMarket)
         {
             selectedMarket = newMarket;
@@ -245,8 +245,8 @@ public class Subsidiary2Plugin : BaseUnityPlugin
 
         GUILayout.Space(8);
 
-        GUILayout.Label("Development Speed (0-10): " + selectedSpeed + "  (+" + FormatMoney(GetSpeedCost(selectedSpeed)) + ")");
-        int newSpeed = Mathf.Clamp(Mathf.RoundToInt(GUILayout.HorizontalSlider(selectedSpeed, 0, 10)), 0, 10);
+        GUILayout.Label("Development Speed (1-10): " + selectedSpeed + "  (+" + FormatMoney(GetSpeedCost(selectedSpeed)) + ")");
+        int newSpeed = Mathf.Clamp(Mathf.RoundToInt(GUILayout.HorizontalSlider(selectedSpeed, 1, 10)), 1, 10);
         if (newSpeed != selectedSpeed)
         {
             selectedSpeed = newSpeed;
@@ -303,7 +303,7 @@ public class Subsidiary2Plugin : BaseUnityPlugin
 
         GUILayout.Space(8);
 
-        long totalCost = CalculateCost(selectedMarket, selectedSpeed, selectedCountry, selectedLogoID);
+        long totalCost = CalculateCost(selectedMarket * 20, selectedSpeed, selectedCountry, selectedLogoID);
         bool canAfford = main != null && main.money >= totalCost;
         string costText = main != null ? main.GetMoney(totalCost, true) : "$" + totalCost;
 
@@ -338,12 +338,6 @@ public class Subsidiary2Plugin : BaseUnityPlugin
         }
 
         GUI.DragWindow();
-    }
-
-    private int GetStarTier(int market)
-    {
-        if (market <= 0) return 1;
-        return Mathf.Clamp(Mathf.CeilToInt(market / 20f), 1, 5);
     }
 
     private long CalculateCost(int market, int speed, int country, int logoID)
@@ -525,8 +519,8 @@ public class Subsidiary2Plugin : BaseUnityPlugin
         main.Pay(cost, 29);
         newStudio.myID = GetFreePublisherID();
         newStudio.SetOwnName(string.IsNullOrEmpty(name) ? "New Studio" : name.Trim());
-        newStudio.stars = Mathf.Clamp(market, 0, 100);
-        newStudio.developmentSpeed = Mathf.Clamp(speed, 0, 10);
+        newStudio.stars = Mathf.Clamp(market * 20, 20, 100);
+        newStudio.developmentSpeed = Mathf.Clamp(speed, 1, 10);
         newStudio.isUnlocked = true;
         newStudio.developer = true;
         newStudio.publisher = false;
@@ -590,11 +584,19 @@ public class Subsidiary2Plugin : BaseUnityPlugin
     private int GetFreePublisherID()
     {
         HashSet<int> usedIDs = new HashSet<int>(FindObjectsOfType<publisherScript>().Select(p => p.myID));
+        // Check first range (9000-9999)
         for (int id = 9000; id < 10000; id++)
         {
             if (!usedIDs.Contains(id)) return id;
         }
-        return Random.Range(9000, 9999);
+        // Check second range (90000-99999)
+        for (int id = 90000; id < 100000; id++)
+        {
+            if (!usedIDs.Contains(id)) return id;
+        }
+        // If all are taken (extremely unlikely), pick random from second range to minimize collision chance
+        log?.LogError("All organic studio ID ranges exhausted! Picking random ID from 90000-99999 — collision possible!");
+        return Random.Range(90000, 99999);
     }
 
     private void InitSubsidiaryDefaults(publisherScript studio)
@@ -1114,6 +1116,94 @@ public class Subsidiary2Plugin : BaseUnityPlugin
             return 0;
         }
     }
+
+    private static publisherScript[] _cachedPublishers;
+    private static int _cachedPublishersFrame = -1;
+
+    private static publisherScript[] GetAllPublishersCached()
+    {
+        int frame = Time.frameCount;
+        if (_cachedPublishersFrame != frame)
+        {
+            _cachedPublishers = UnityEngine.Object.FindObjectsOfType<publisherScript>();
+            _cachedPublishersFrame = frame;
+        }
+        return _cachedPublishers;
+    }
+
+    private static GameObject[] _cachedGameObjects;
+    private static int _cachedGameObjectsFrame = -1;
+
+    private static GameObject[] GetAllGamesCached()
+    {
+        int frame = Time.frameCount;
+        if (_cachedGameObjectsFrame != frame)
+        {
+            _cachedGameObjects = GameObject.FindGameObjectsWithTag("Game");
+            _cachedGameObjectsFrame = frame;
+        }
+        return _cachedGameObjects;
+    }
+
+    public static bool IsSubsidiaryGame(gameScript game)
+    {
+        if (game == null) return false;
+        try
+        {
+            mainScript main = GetMainScript();
+            if (main == null) return false;
+
+            publisherScript[] publishers = GetAllPublishersCached();
+            int[] ids = new int[] { game.ownerID, game.developerID, game.publisherID };
+            for (int i = 0; i < ids.Length; i++)
+            {
+                int id = ids[i];
+                if (id <= 0 || id == main.myID) continue;
+
+                for (int j = 0; j < publishers.Length; j++)
+                {
+                    publisherScript pub = publishers[j];
+                    if (pub != null && (bool)pub && pub.myID == id && pub.IsMyTochterfirma())
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (log != null) log.LogError("Error in IsSubsidiaryGame: " + ex);
+        }
+        return false;
+    }
+
+    public static gameScript FindFirstSubsidiaryGame(bool includeOnMarketOrDev, bool includeDrawer)
+    {
+        try
+        {
+            mainScript main = GetMainScript();
+            if (main == null) return null;
+
+            GameObject[] gameObjects = GetAllGamesCached();
+            for (int i = 0; i < gameObjects.Length; i++)
+            {
+                gameScript game = gameObjects[i]?.GetComponent<gameScript>();
+                if (game == null || game.typ_contractGame) continue;
+
+                bool statusMatch = false;
+                if (includeOnMarketOrDev && (game.isOnMarket || game.inDevelopment)) statusMatch = true;
+                if (includeDrawer && game.schublade) statusMatch = true;
+                if (!statusMatch) continue;
+
+                if (IsSubsidiaryGame(game)) return game;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (log != null) log.LogError("Error in FindFirstSubsidiaryGame: " + ex);
+        }
+        return null;
+    }
 }
 
 [HarmonyPatch(typeof(publisherScript), "IsMyTochterfirma")]
@@ -1473,7 +1563,11 @@ public static class Menu_W_FirmaVerkaufen_Init_Patch
                         }
                     }
                     
-                    __instance.uiObjects[0].GetComponent<Text>().text = text;
+                    if (__instance.uiObjects != null && __instance.uiObjects.Length > 0 && __instance.uiObjects[0] != null)
+                    {
+                        Text textComp = __instance.uiObjects[0].GetComponent<Text>();
+                        if (textComp != null) textComp.text = text;
+                    }
                 }
             }
         } catch (System.Exception ex) {
@@ -1540,14 +1634,24 @@ public static class Menu_W_FirmaVerkaufen_BUTTON_Yes_Patch
                         guiMain.MessageBox(text, closeMenu: false);
                     }
 
-                    if (guiMain.uiObjects[387].activeSelf)
+                    if (guiMain.uiObjects != null && guiMain.uiObjects.Length > 387 && guiMain.uiObjects[387] != null)
                     {
-                        guiMain.uiObjects[387].SetActive(false);
+                        if (guiMain.uiObjects[387].activeSelf)
+                        {
+                            guiMain.uiObjects[387].SetActive(false);
+                        }
                     }
 
-                    if (guiMain.uiObjects[385].activeSelf)
+                    if (guiMain.uiObjects != null && guiMain.uiObjects.Length > 385 && guiMain.uiObjects[385] != null)
                     {
-                        guiMain.uiObjects[385].GetComponent<Menu_Statistics_Tochterfirmen>().BUTTON_Search();
+                        if (guiMain.uiObjects[385].activeSelf)
+                        {
+                            Menu_Statistics_Tochterfirmen statsMenu = guiMain.uiObjects[385].GetComponent<Menu_Statistics_Tochterfirmen>();
+                            if (statsMenu != null)
+                            {
+                                statsMenu.BUTTON_Search();
+                            }
+                        }
                     }
 
                     __instance.BUTTON_Abbrechen();
@@ -1570,7 +1674,11 @@ public static class Item_Stats_Tochterfirma_SetData_Patch
             if (__instance.pS_ != null && Subsidiary2Plugin.IsOrganicStudio(__instance.pS_))
             {
                 long customValue = Subsidiary2Plugin.GetOrganicSaleValue(__instance.pS_);
-                __instance.uiObjects[4].GetComponent<Text>().text = __instance.mS_.GetMoney(customValue, showDollar: true);
+                if (__instance.uiObjects != null && __instance.uiObjects.Length > 4 && __instance.uiObjects[4] != null)
+                {
+                    Text textComp = __instance.uiObjects[4].GetComponent<Text>();
+                    if (textComp != null) textComp.text = __instance.mS_.GetMoney(customValue, showDollar: true);
+                }
             }
         } catch (System.Exception ex) {
             if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in Item_Stats_Tochterfirma_SetData_Patch: " + ex);
@@ -1596,7 +1704,11 @@ public static class Menu_Stats_Tochterfirma_Main_Update_Patch
                 if (mS != null && tS != null)
                 {
                     long customValue = Subsidiary2Plugin.GetOrganicSaleValue(pS);
-                    __instance.uiObjects[7].GetComponent<Text>().text = tS.GetText(685) + ": <b>" + mS.GetMoney(customValue, showDollar: true) + "</b>";
+                    if (__instance.uiObjects != null && __instance.uiObjects.Length > 7 && __instance.uiObjects[7] != null)
+                    {
+                        Text textComp = __instance.uiObjects[7].GetComponent<Text>();
+                        if (textComp != null) textComp.text = tS.GetText(685) + ": <b>" + mS.GetMoney(customValue, showDollar: true) + "</b>";
+                    }
                 }
             }
         } catch (System.Exception ex) {
@@ -1623,7 +1735,11 @@ public static class Menu_Stats_Tochterfirma_Main_UpdateData_Patch
                 if (mS != null && tS != null)
                 {
                     long customValue = Subsidiary2Plugin.GetOrganicSaleValue(pS);
-                    __instance.uiObjects[7].GetComponent<Text>().text = tS.GetText(685) + ": <b>" + mS.GetMoney(customValue, showDollar: true) + "</b>";
+                    if (__instance.uiObjects != null && __instance.uiObjects.Length > 7 && __instance.uiObjects[7] != null)
+                    {
+                        Text textComp = __instance.uiObjects[7].GetComponent<Text>();
+                        if (textComp != null) textComp.text = tS.GetText(685) + ": <b>" + mS.GetMoney(customValue, showDollar: true) + "</b>";
+                    }
                 }
             }
         } catch (System.Exception ex) {
@@ -1635,8 +1751,9 @@ public static class Menu_Stats_Tochterfirma_Main_UpdateData_Patch
 [HarmonyPatch(typeof(Menu_W_FirmaAufwerten), "BUTTON_Yes")]
 public static class OrganicSubsidiaryUpgradePatch
 {
-    public static void Prefix(Menu_W_FirmaAufwerten __instance)
+    public static void Prefix(Menu_W_FirmaAufwerten __instance, out (int preStars, int preSpeed)? __state)
     {
+        __state = null;
         try {
             System.Reflection.FieldInfo publisherField = AccessTools.Field(typeof(Menu_W_FirmaAufwerten), "pS_");
             System.Reflection.FieldInfo mainField = AccessTools.Field(typeof(Menu_W_FirmaAufwerten), "mS_");
@@ -1657,10 +1774,149 @@ public static class OrganicSubsidiaryUpgradePatch
             long upgradeCost = __instance.costs[starsAmount];
             if (mainScript.money >= upgradeCost)
             {
+                __state = (starsAmount, studio.developmentSpeed);
                 Subsidiary2Plugin.AddOrganicUpgradeInvestment(studio, upgradeCost);
             }
         } catch (System.Exception ex) {
-            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in OrganicSubsidiaryUpgradePatch: " + ex);
+            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in OrganicSubsidiaryUpgradePatch Prefix: " + ex);
+        }
+    }
+
+    public static void Postfix(Menu_W_FirmaAufwerten __instance, (int preStars, int preSpeed)? __state)
+    {
+        try {
+            if (!__state.HasValue) return;
+            System.Reflection.FieldInfo publisherField = AccessTools.Field(typeof(Menu_W_FirmaAufwerten), "pS_");
+            publisherScript studio = publisherField != null ? publisherField.GetValue(__instance) as publisherScript : null;
+            if (studio == null) return;
+
+            // Trigger DST's RecalculateActiveProjectTimeline with studio-level upgrade flag
+            System.Type timelineClass = System.Type.GetType("DynamicSubsidiaryTimelinePlugin, DynamicSubsidiaryTimeline");
+            if (timelineClass == null)
+            {
+                foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    timelineClass = assembly.GetType("DynamicSubsidiaryTimelinePlugin");
+                    if (timelineClass != null) break;
+                }
+            }
+            if (timelineClass != null)
+            {
+                var preStarsField = AccessTools.Field(timelineClass, "preUpgradeStars");
+                var preSpeedField = AccessTools.Field(timelineClass, "preUpgradeSpeed");
+                var preStudioField = AccessTools.Field(timelineClass, "preUpgradeIsStudioLevel");
+                if (preStarsField != null) preStarsField.SetValue(null, __state.Value.preStars);
+                if (preSpeedField != null) preSpeedField.SetValue(null, __state.Value.preSpeed);
+                if (preStudioField != null) preStudioField.SetValue(null, true);
+
+                var method = AccessTools.Method(timelineClass, "RecalculateActiveProjectTimeline");
+                if (method != null) method.Invoke(null, new object[] { studio });
+            }
+
+            // Refresh UI if open
+            Menu_Stats_Tochterfirma_Main menu = UnityEngine.Object.FindObjectOfType<Menu_Stats_Tochterfirma_Main>();
+            if (menu != null && menu.gameObject.activeInHierarchy)
+            {
+                menu.UpdateData();
+            }
+        } catch (System.Exception ex) {
+            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in OrganicSubsidiaryUpgradePatch Postfix: " + ex);
+        }
+    }
+}
+
+[HarmonyPatch(typeof(Menu_MesseSelectGame), "CheckGameData")]
+public static class MesseSelectGame_CheckGameData_Patch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(gameScript script_, ref bool __result)
+    {
+        try
+        {
+            if (script_ != null && !script_.typ_contractGame && (script_.inDevelopment || script_.isOnMarket || script_.schublade) && Subsidiary2Plugin.IsSubsidiaryGame(script_))
+            {
+                __result = true;
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in MesseSelectGame_CheckGameData: " + ex);
+        }
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(Menu_Marketing_SelectGame), "CheckGameData")]
+public static class MarketingSelectGame_CheckGameData_Patch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(gameScript script_, ref bool __result)
+    {
+        try
+        {
+            if (script_ != null && !script_.typ_contractGame && (script_.inDevelopment || script_.isOnMarket || script_.schublade) && Subsidiary2Plugin.IsSubsidiaryGame(script_))
+            {
+                __result = true;
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in MarketingSelectGame_CheckGameData: " + ex);
+        }
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(Menu_Marketing_SpezialSelectGame), "CheckGameData")]
+public static class MarketingSpezialSelectGame_CheckGameData_Patch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(gameScript script_, ref bool __result)
+    {
+        try
+        {
+            if (script_ != null && !script_.typ_contractGame && (script_.inDevelopment || script_.isOnMarket || script_.schublade) && Subsidiary2Plugin.IsSubsidiaryGame(script_))
+            {
+                __result = true;
+                return false;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in MarketingSpezialSelectGame_CheckGameData: " + ex);
+        }
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(Menu_Marketing_GameKampagne), "FindGame")]
+public static class MarketingGameKampagne_FindGame_Patch
+{
+    [HarmonyPostfix]
+    private static void Postfix(ref gameScript __result)
+    {
+        try
+        {
+            if (__result != null) return;
+
+            gameScript found = Subsidiary2Plugin.FindFirstSubsidiaryGame(true, false);
+            if (found != null)
+            {
+                __result = found;
+                return;
+            }
+
+            found = Subsidiary2Plugin.FindFirstSubsidiaryGame(false, true);
+            if (found != null)
+            {
+                __result = found;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (Subsidiary2Plugin.log != null) Subsidiary2Plugin.log.LogError("Error in MarketingGameKampagne_FindGame: " + ex);
         }
     }
 }

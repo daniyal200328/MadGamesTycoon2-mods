@@ -47,8 +47,14 @@ public class SubsidiaryProjectDirectorPlugin : BaseUnityPlugin
 
     public static void InjectButton(Menu_Stats_Tochterfirma_Main menu, publisherScript subsidiary)
     {
+        #region debug-point B:inject-button-start
+        SubsidiaryProjectDirectorPlugin.log?.LogInfo("[DEBUG] InjectButton - Entering");
+        #endregion
         if (menu == null || subsidiary == null || menu.uiObjects == null || menu.uiObjects.Length <= 31)
         {
+            #region debug-point B:inject-button-early-return
+            SubsidiaryProjectDirectorPlugin.log?.LogInfo("[DEBUG] InjectButton - Early return: invalid params");
+            #endregion
             return;
         }
 

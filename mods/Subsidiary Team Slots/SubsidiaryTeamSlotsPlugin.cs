@@ -856,9 +856,11 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
                 var preStarsField = AccessTools.Field(timelineClass, "preUpgradeStars");
                 var preSpeedField = AccessTools.Field(timelineClass, "preUpgradeSpeed");
                 var preStudioField = AccessTools.Field(timelineClass, "preUpgradeIsStudioLevel");
+                var preSlotField = AccessTools.Field(timelineClass, "preUpgradeSlotIndex");
                 if (preStarsField != null) preStarsField.SetValue(null, preStars);
                 if (preSpeedField != null) preSpeedField.SetValue(null, preSpeed);
                 if (preStudioField != null) preStudioField.SetValue(null, false);
+                if (preSlotField != null) preSlotField.SetValue(null, slotIdx);
 
                 var method = AccessTools.Method(timelineClass, "RecalculateActiveProjectTimeline");
                 if (method != null) method.Invoke(null, new object[] { studio });
@@ -885,73 +887,138 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
 
     public static void TryUpgradeTeamSpeed(publisherScript studio, int slotIdx)
     {
-        if (slotIdx < 1 || slotIdx > 2) return;
+        if (slotIdx < 0 || slotIdx > 2) return;
 
         mainScript main = studio.mS_ != null ? studio.mS_ : UnityEngine.Object.FindObjectOfType<mainScript>();
         GUI_Main gui = UnityEngine.Object.FindObjectOfType<GUI_Main>();
 
         if (main == null || gui == null) return;
 
-        StudioSlotData data = GetStudioSlotData(studio.myID);
-        SlotData slot = data.slots[slotIdx];
-
-        int maxSpeed = studio.developmentSpeed;
-        if (slot.speed >= maxSpeed)
-        {
-            gui.MessageBox($"Cannot upgrade team speed beyond the studio's speed level (Level {maxSpeed})!", closeMenu: false);
-            return;
-        }
-
         bool isOrganic = IsOrganicStudio(studio);
-        long cost = isOrganic ? (500000L * (slot.speed + 1)) : (1500000L * (slot.speed + 1));
 
-        if (main.money < cost)
+        if (slotIdx == 0)
         {
-            gui.ShowNoMoney();
-            return;
-        }
-
-        int preStars = slot.stars;
-        int preSpeed = slot.speed;
-
-        main.Pay(cost, 29);
-        slot.speed++;
-        SaveState(currentSaveSlot);
-
-        // Recalculate duration instantly
-        try
-        {
-            System.Type timelineClass = System.Type.GetType("DynamicSubsidiaryTimelinePlugin, DynamicSubsidiaryTimeline");
-            if (timelineClass == null)
+            int maxSpeed = isOrganic ? 10 : 4;
+            if (studio.developmentSpeed >= maxSpeed)
             {
-                foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+                gui.MessageBox($"Studio speed is already at max level ({maxSpeed})!", closeMenu: false);
+                return;
+            }
+
+            long cost = isOrganic ? (500000L * (studio.developmentSpeed + 1)) : (1500000L * (studio.developmentSpeed + 1));
+
+            if (main.money < cost)
+            {
+                gui.ShowNoMoney();
+                return;
+            }
+
+            int preStars = studio.GetStarsAmount();
+            int preSpeed = studio.developmentSpeed;
+
+            main.Pay(cost, 29);
+            studio.developmentSpeed++;
+            SaveState(currentSaveSlot);
+
+            try
+            {
+                System.Type timelineClass = System.Type.GetType("DynamicSubsidiaryTimelinePlugin, DynamicSubsidiaryTimeline");
+                if (timelineClass == null)
                 {
-                    timelineClass = assembly.GetType("DynamicSubsidiaryTimelinePlugin");
-                    if (timelineClass != null) break;
+                    foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        timelineClass = assembly.GetType("DynamicSubsidiaryTimelinePlugin");
+                        if (timelineClass != null) break;
+                    }
+                }
+                if (timelineClass != null)
+                {
+                    var preStarsField = AccessTools.Field(timelineClass, "preUpgradeStars");
+                    var preSpeedField = AccessTools.Field(timelineClass, "preUpgradeSpeed");
+                    var preStudioField = AccessTools.Field(timelineClass, "preUpgradeIsStudioLevel");
+                    var preSlotField = AccessTools.Field(timelineClass, "preUpgradeSlotIndex");
+                    if (preStarsField != null) preStarsField.SetValue(null, preStars);
+                    if (preSpeedField != null) preSpeedField.SetValue(null, preSpeed);
+                    if (preStudioField != null) preStudioField.SetValue(null, false);
+                    if (preSlotField != null) preSlotField.SetValue(null, slotIdx);
+
+                    var method = AccessTools.Method(timelineClass, "RecalculateActiveProjectTimeline");
+                    if (method != null) method.Invoke(null, new object[] { studio });
                 }
             }
-            if (timelineClass != null)
+            catch (System.Exception ex)
             {
-                var preStarsField = AccessTools.Field(timelineClass, "preUpgradeStars");
-                var preSpeedField = AccessTools.Field(timelineClass, "preUpgradeSpeed");
-                var preStudioField = AccessTools.Field(timelineClass, "preUpgradeIsStudioLevel");
-                if (preStarsField != null) preStarsField.SetValue(null, preStars);
-                if (preSpeedField != null) preSpeedField.SetValue(null, preSpeed);
-                if (preStudioField != null) preStudioField.SetValue(null, false);
-
-                var method = AccessTools.Method(timelineClass, "RecalculateActiveProjectTimeline");
-                if (method != null) method.Invoke(null, new object[] { studio });
+                Log?.LogWarning("Failed to trigger RecalculateActiveProjectTimeline: " + ex);
             }
+
+            sfxScript sfx = UnityEngine.Object.FindObjectOfType<sfxScript>();
+            if (sfx != null) sfx.PlaySound(22, true);
+
+            gui.MessageBox($"Upgraded main team speed to level {studio.developmentSpeed}!", closeMenu: false);
         }
-        catch (System.Exception ex)
+        else
         {
-            Log?.LogWarning("Failed to trigger RecalculateActiveProjectTimeline: " + ex);
+            StudioSlotData data = GetStudioSlotData(studio.myID);
+            SlotData slot = data.slots[slotIdx];
+
+            int maxSpeed = studio.developmentSpeed;
+            if (slot.speed >= maxSpeed)
+            {
+                gui.MessageBox($"Cannot upgrade team speed beyond the studio's speed level (Level {maxSpeed})!", closeMenu: false);
+                return;
+            }
+
+            long cost = isOrganic ? (500000L * (slot.speed + 1)) : (1500000L * (slot.speed + 1));
+
+            if (main.money < cost)
+            {
+                gui.ShowNoMoney();
+                return;
+            }
+
+            int preStars = slot.stars;
+            int preSpeed = slot.speed;
+
+            main.Pay(cost, 29);
+            slot.speed++;
+            SaveState(currentSaveSlot);
+
+            try
+            {
+                System.Type timelineClass = System.Type.GetType("DynamicSubsidiaryTimelinePlugin, DynamicSubsidiaryTimeline");
+                if (timelineClass == null)
+                {
+                    foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        timelineClass = assembly.GetType("DynamicSubsidiaryTimelinePlugin");
+                        if (timelineClass != null) break;
+                    }
+                }
+                if (timelineClass != null)
+                {
+                    var preStarsField = AccessTools.Field(timelineClass, "preUpgradeStars");
+                    var preSpeedField = AccessTools.Field(timelineClass, "preUpgradeSpeed");
+                    var preStudioField = AccessTools.Field(timelineClass, "preUpgradeIsStudioLevel");
+                    var preSlotField = AccessTools.Field(timelineClass, "preUpgradeSlotIndex");
+                    if (preStarsField != null) preStarsField.SetValue(null, preStars);
+                    if (preSpeedField != null) preSpeedField.SetValue(null, preSpeed);
+                    if (preStudioField != null) preStudioField.SetValue(null, false);
+                    if (preSlotField != null) preSlotField.SetValue(null, slotIdx);
+
+                    var method = AccessTools.Method(timelineClass, "RecalculateActiveProjectTimeline");
+                    if (method != null) method.Invoke(null, new object[] { studio });
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log?.LogWarning("Failed to trigger RecalculateActiveProjectTimeline: " + ex);
+            }
+
+            sfxScript sfx = UnityEngine.Object.FindObjectOfType<sfxScript>();
+            if (sfx != null) sfx.PlaySound(22, true);
+
+            gui.MessageBox($"Upgraded {slot.teamName} speed to level {slot.speed}!", closeMenu: false);
         }
-
-        sfxScript sfx = UnityEngine.Object.FindObjectOfType<sfxScript>();
-        if (sfx != null) sfx.PlaySound(22, true);
-
-        gui.MessageBox($"Upgraded {slot.teamName} speed to level {slot.speed}!", closeMenu: false);
 
         lastBuiltForStudio = -1;
         shiftedMenuInstances.Clear();
@@ -1270,10 +1337,16 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
 
     public static void RefreshSlotUI(Menu_Stats_Tochterfirma_Main menu, publisherScript studio)
     {
+        #region debug-point A:refresh-slot-ui
+        SubsidiaryTeamSlotsPlugin.Log?.LogInfo("[DEBUG] RefreshSlotUI - Entering");
+        #endregion
         if (menu == null || studio == null) return;
         activeMenuInstance = menu;
         if (!studio.developer)
         {
+            #region debug-point A:studio-not-developer
+            SubsidiaryTeamSlotsPlugin.Log?.LogInfo("[DEBUG] RefreshSlotUI - Studio not developer");
+            #endregion
             ClearClonedUI();
             return;
         }
@@ -1281,6 +1354,9 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
         // If we switched to a different studio, clear and rebuild
         if (lastBuiltForStudio != studio.myID)
         {
+            #region debug-point A:switching-studio
+            SubsidiaryTeamSlotsPlugin.Log?.LogInfo("[DEBUG] RefreshSlotUI - Switching to new studio: " + studio.myID);
+            #endregion
             ClearClonedUI();
             lastBuiltForStudio = studio.myID;
         }
@@ -1289,6 +1365,10 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
         textScript tS = f_tS.GetValue(menu) as textScript;
         StudioSlotData data = GetStudioSlotData(studio.myID);
         games gamesScript = studio.games_ != null ? studio.games_ : GetGamesScript();
+        
+        #region debug-point A:before-ensure-side-panel
+        SubsidiaryTeamSlotsPlugin.Log?.LogInfo($"[DEBUG] RefreshSlotUI - About to call EnsureSidePanel. guiMain: {guiMain != null}, tS: {tS != null}, data: {data != null}");
+        #endregion
 
         // Ensure Side Panel & UI rows exist (lazy build)
         EnsureSidePanel(menu, data, tS, guiMain, studio);
@@ -1321,10 +1401,18 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
 
     private static void EnsureSidePanel(Menu_Stats_Tochterfirma_Main menu, StudioSlotData data, textScript tS, GUI_Main guiMain, publisherScript studio)
     {
+        #region debug-point A:ensure-side-panel-start
+        SubsidiaryTeamSlotsPlugin.Log?.LogInfo($"[DEBUG] EnsureSidePanel - Entering. uiObjects null: {menu.uiObjects == null}, uiObjects length: {menu.uiObjects?.Length ?? -1}");
+        #endregion
         if (menu.uiObjects == null || menu.uiObjects.Length <= 31) return;
 
         // If sidePanel exists, return
-        if (sidePanel != null) return;
+        if (sidePanel != null) {
+            #region debug-point A:side-panel-exists
+            SubsidiaryTeamSlotsPlugin.Log?.LogInfo("[DEBUG] EnsureSidePanel - Side panel already exists");
+            #endregion
+            return;
+        }
 
         // Add lifecycle hook component to clean up side panel on close
         if (menu.gameObject.GetComponent<STSWindowLifecycleHook>() == null)
@@ -2151,11 +2239,27 @@ public class SubsidiaryTeamSlotsPlugin : BaseUnityPlugin
 
                     if (slotIdx == 0)
                     {
-                        // Slot 1: no close or upgrade buttons
-                        if (row.idleStatusText != null) row.idleStatusText.text = "Main Team (Studio Rating)";
+                        if (row.idleStatusText != null) row.idleStatusText.text = "Main Team";
                         if (row.upgradeStarsButton != null) row.upgradeStarsButton.gameObject.SetActive(false);
-                        if (row.upgradeSpeedButton != null) row.upgradeSpeedButton.gameObject.SetActive(false);
                         if (row.closeTeamButton != null) row.closeTeamButton.gameObject.SetActive(false);
+
+                        if (row.upgradeSpeedButton != null)
+                        {
+                            row.upgradeSpeedButton.gameObject.SetActive(true);
+                            NormalizeRectTransform(row.upgradeSpeedButton.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(95f, 22f), new Vector2(0f, 8f));
+                            int speedCap = isOrganic ? 10 : 4;
+                            if (studio.developmentSpeed >= speedCap)
+                            {
+                                row.upgradeSpeedButton.interactable = false;
+                                if (row.upgradeSpeedText != null) row.upgradeSpeedText.text = "Max Speed";
+                            }
+                            else
+                            {
+                                long cost = isOrganic ? (500000L * (studio.developmentSpeed + 1)) : (1500000L * (studio.developmentSpeed + 1));
+                                row.upgradeSpeedButton.interactable = true;
+                                if (row.upgradeSpeedText != null) row.upgradeSpeedText.text = $"⚡ Up (${cost / 1000f:N0}k)";
+                            }
+                        }
                     }
                     else
                     {
@@ -2558,10 +2662,15 @@ public static class Menu_Stats_Tochterfirma_Main_UpdateData_Patch
             {
                 // Sync Slot 1 data to vanilla widgets so slot 1 renders naturally in the main panel
                 SubsidiaryTeamSlotsPlugin.StudioSlotData data = SubsidiaryTeamSlotsPlugin.GetStudioSlotData(studio.myID);
+                if (data == null || data.slots == null || data.slots.Length == 0) return;
+                
                 games gamesScript = studio.games_ != null ? studio.games_ : SubsidiaryTeamSlotsPlugin.GetGamesScript();
 
                 gameScript slot1Game = SubsidiaryTeamSlotsPlugin.FindGameByID(gamesScript, data.slots[0].gameID);
-                SubsidiaryTeamSlotsPlugin.f_nextGame.SetValue(__instance, slot1Game);
+                if (SubsidiaryTeamSlotsPlugin.f_nextGame != null)
+                {
+                    SubsidiaryTeamSlotsPlugin.f_nextGame.SetValue(__instance, slot1Game);
+                }
 
                 if (slot1Game != null)
                 {

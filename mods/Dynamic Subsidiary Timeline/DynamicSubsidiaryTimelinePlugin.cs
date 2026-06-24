@@ -26,6 +26,15 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
     private static ConfigEntry<float> cfgCostsIdleDrop;
     private static ConfigEntry<float> cfgCostsAAAAMultiplier;
 
+    // Multi-Team Penalty (resources stretched when running multiple projects simultaneously)
+    private static ConfigEntry<bool> cfgMultiTeamPenaltyEnabled;
+    private static ConfigEntry<float> cfgMultiTeamPenaltyPercent; // % added to weeks per extra active project (16-22% recommended)
+
+    // Development Duration Multipliers (tf_entwicklungsdauer)
+    private static ConfigEntry<float> cfgDevDurationShort;
+    private static ConfigEntry<float> cfgDevDurationBalanced;
+    private static ConfigEntry<float> cfgDevDurationGenerous;
+
     internal static ManualLogSource log;
 
     // ───────────────────────────────────────────────────────
@@ -87,15 +96,20 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
 
     // GUI Overlay State
     private static bool showConfigWindow = false;
-    private static Rect configWindowRect = new Rect(100, 100, 480, 480);
+    private static Rect configWindowRect = new Rect(100, 100, 480, 560);
     private static string upkeepCapString = "";
     private static string inflationRateString = "";
+    private static string multiTeamPenaltyPercentString = "";
+    private static string devDurationShortString = "";
+    private static string devDurationBalancedString = "";
+    private static string devDurationGenerousString = "";
     private static string[][] timelineStrings = null;
 
     // Upgrade tracking state
     private static int preUpgradeStars = -1;
     private static int preUpgradeSpeed = -1;
     private static bool preUpgradeIsStudioLevel = false;
+    private static int preUpgradeSlotIndex = -1;
 
     // Team Slots Mod Integration (direct API — no reflection needed; types are public)
     private static bool teamSlotsAvailable = false;
@@ -315,7 +329,105 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         // Vanilla path (no Team Slots, or game not yet in a slot — write vanilla fields as handoff)
         studio.newGameInWeeks       = Mathf.RoundToInt(remaining);
         studio.newGameInWeeksORG    = Mathf.RoundToInt(total);
-        studio.tf_entwicklungsdauer = studio.newGameInWeeks;
+    }
+
+    /// <summary>
+    /// Recalculates game development points (devPoints_Gesamt) based on the new total week count.
+    /// Preserves the progress fraction so that the same percentage of work remains.
+    /// This makes the game complete faster when studio speed/stars increase.
+    /// </summary>
+    private static void RecalculateGameDevPoints(gameScript game, float newTotalWeeks, float progressFraction)
+    {
+        if (game == null) return;
+
+        try
+        {
+            // Scale devPoints proportionally to the new week count
+            // Get the original devPoints start value
+            float originalDevPointsStart = game.devPointsStart_Gesamt;
+            
+            if (originalDevPointsStart <= 0f) return; // Safety check
+
+            // Find the slot for this game to get the actual previous total weeks
+            float oldTotalWeeks = 0f;
+            try
+            {
+                if (IsTeamSlotsLoaded())
+                {
+                    try
+                    {
+                        // Use reflection to find the studio that owns this game
+                        // (we don't have studio reference here, search globally)
+                        games gamesManager = UnityEngine.Object.FindObjectOfType<games>();
+                        if (gamesManager != null && gamesManager.arrayGamesScripts != null)
+                        {
+                            for (int i = 0; i < gamesManager.arrayGamesScripts.Length; i++)
+                            {
+                                if (gamesManager.arrayGamesScripts[i] == game)
+                                {
+                                    // Try to find the studio via developerID
+                                    int developerID = game.developerID;
+                                    if (developerID != -1)
+                                    {
+                                        SubsidiaryTeamSlotsPlugin.StudioSlotData slotData = SubsidiaryTeamSlotsPlugin.GetStudioSlotData(developerID);
+                                        if (slotData != null && slotData.slots != null)
+                                        {
+                                            for (int s = 0; s < slotData.slots.Length; s++)
+                                            {
+                                                if (slotData.slots[s] != null && slotData.slots[s].gameID == game.myID)
+                                                {
+                                                    oldTotalWeeks = slotData.slots[s].totalWeeks;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            // Fall back to heuristic if we couldn't find the previous total weeks
+            if (oldTotalWeeks <= 0f)
+            {
+                // Estimate points per week (rough heuristic: typically 3-5 points per week)
+                oldTotalWeeks = Mathf.Max(1f, originalDevPointsStart / 4f);
+            }
+            
+            // Calculate the scaling factor based on actual previous total weeks vs new total weeks
+            float weekScaling = newTotalWeeks / Mathf.Max(1f, oldTotalWeeks);
+            
+            // Recalculate total devPoints based on new week count
+            float newTotalDevPoints = originalDevPointsStart * weekScaling;
+            game.devPointsStart_Gesamt = newTotalDevPoints;
+            
+            // Update remaining devPoints to match progress (preserve % complete)
+            float newRemainingDevPoints = newTotalDevPoints * (1f - progressFraction);
+            game.devPoints_Gesamt = Mathf.Max(1f, newRemainingDevPoints);
+
+            if (log != null && cfgLogCalc.Value)
+            {
+                log.LogInfo(string.Format(
+                    "[Upgrade DevPoints] Game '{0}' | Progress: {1:P0} | " +
+                    "OldTotalWeeks: {2:F1} -> NewTotalWeeks: {3:F1} | " +
+                    "DevPoints: {4:F0} -> {5:F0} (total), Remaining: {6:F0}",
+                    game.GetNameWithTag(),
+                    progressFraction,
+                    oldTotalWeeks, newTotalWeeks,
+                    originalDevPointsStart,
+                    game.devPointsStart_Gesamt,
+                    newRemainingDevPoints));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (log != null) log.LogError($"Error in RecalculateGameDevPoints: {ex}");
+        }
     }
 
     /// <summary>
@@ -400,6 +512,22 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             cfgHardCeilWeeks[i] = Config.Bind("Timelines", label + "_CeilWeeks", defaultCeils[i], $"Hard ceiling weeks for {label} games.");
         }
 
+        // Multi-Team Penalty config: when multiple slots have an active project simultaneously,
+        // each additional active project (beyond the first) adds this % overhead to the
+        // development duration.  This represents stretched resources and coordination costs.
+        //   1 active project  → 0% penalty (no overhead)
+        //   2 active projects → cfgMultiTeamPenaltyPercent extra weeks on EACH project
+        //   3 active projects → 2 × cfgMultiTeamPenaltyPercent extra weeks on EACH project
+        // Default 18% is in the recommended 16-22% range.
+        cfgMultiTeamPenaltyEnabled = Config.Bind("MultiTeamPenalty", "Enabled", true,
+            "Enable the multi-team simultaneous-development penalty. Disable for vanilla-style 3 parallel AAAA games.");
+        cfgMultiTeamPenaltyPercent = Config.Bind("MultiTeamPenalty", "PercentPerExtraProject", 18.0f,
+            "Percentage added to development duration for each extra active project (16-22 recommended). Example: 18.0 → 2 projects = +18% weeks, 3 projects = +36% weeks.");
+
+        cfgDevDurationShort    = Config.Bind("DevDuration", "ShortMultiplier",     0.65f, "Multiplier when tf_entwicklungsdauer = 0 (Short)");
+        cfgDevDurationBalanced = Config.Bind("DevDuration", "BalancedMultiplier",  0.85f, "Multiplier when tf_entwicklungsdauer = 1 (Balanced)");
+        cfgDevDurationGenerous = Config.Bind("DevDuration", "GenerousMultiplier",  1.00f, "Multiplier when tf_entwicklungsdauer = 2 (Generous)");
+
         new Harmony("org.bepinex.plugins.dynamicsubsidiarytimeline").PatchAll();
         log.LogInfo("Dynamic Subsidiary Timeline Plugin loaded successfully.");
     }
@@ -432,6 +560,10 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
     {
         upkeepCapString = cfgMaxUpkeepCap.Value.ToString();
         inflationRateString = cfgBaseInflationRate.Value.ToString();
+        multiTeamPenaltyPercentString = cfgMultiTeamPenaltyPercent != null ? cfgMultiTeamPenaltyPercent.Value.ToString("F1") : "18.0";
+        devDurationShortString     = cfgDevDurationShort    != null ? cfgDevDurationShort.Value.ToString("F2")    : "0.65";
+        devDurationBalancedString  = cfgDevDurationBalanced != null ? cfgDevDurationBalanced.Value.ToString("F2") : "0.85";
+        devDurationGenerousString  = cfgDevDurationGenerous != null ? cfgDevDurationGenerous.Value.ToString("F2") : "1.00";
         if (timelineStrings == null)
         {
             timelineStrings = new string[6][];
@@ -462,6 +594,49 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         GUILayout.BeginHorizontal();
         GUILayout.Label("Base Inflation Rate (%):", GUILayout.Width(170));
         inflationRateString = GUILayout.TextField(inflationRateString, GUILayout.Width(130));
+        GUILayout.EndHorizontal();
+        GUILayout.Space(10);
+
+        // ── Multi-Team Penalty (simultaneous development overhead) ──
+        GUILayout.Label("<b>Multi-Team Penalty</b> (overhead when multiple teams run projects in parallel)");
+        GUILayout.BeginHorizontal();
+        bool mtEnabled = cfgMultiTeamPenaltyEnabled != null && cfgMultiTeamPenaltyEnabled.Value;
+        bool newMtEnabled = GUILayout.Toggle(mtEnabled, "  Enable Penalty", GUILayout.Width(140));
+        if (newMtEnabled != mtEnabled && cfgMultiTeamPenaltyEnabled != null)
+        {
+            cfgMultiTeamPenaltyEnabled.Value = newMtEnabled;
+        }
+        GUILayout.Label("Percent per extra project (%):", GUILayout.Width(200));
+        multiTeamPenaltyPercentString = GUILayout.TextField(multiTeamPenaltyPercentString, GUILayout.Width(80));
+        GUILayout.EndHorizontal();
+        if (cfgMultiTeamPenaltyEnabled != null && cfgMultiTeamPenaltyEnabled.Value
+            && cfgMultiTeamPenaltyPercent != null)
+        {
+            float pct = cfgMultiTeamPenaltyPercent.Value;
+            GUILayout.Label(string.Format(
+                "  <color=#cccccc>1 active = 1.00x | 2 active = {0:F2}x | 3 active = {1:F2}x</color>",
+                1f + (pct / 100f),
+                1f + 2f * (pct / 100f)));
+        }
+        else
+        {
+            GUILayout.Label("  <color=#cccccc>(disabled - no penalty applied)</color>");
+        }
+        GUILayout.Space(10);
+
+        // ── Development Duration Multipliers (tf_entwicklungsdauer) ──
+        GUILayout.Label("<b>Dev Duration Multipliers</b> (applied after DST formula)");
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Short (×):", GUILayout.Width(170));
+        devDurationShortString = GUILayout.TextField(devDurationShortString, GUILayout.Width(80));
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Balanced (×):", GUILayout.Width(170));
+        devDurationBalancedString = GUILayout.TextField(devDurationBalancedString, GUILayout.Width(80));
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Generous (×):", GUILayout.Width(170));
+        devDurationGenerousString = GUILayout.TextField(devDurationGenerousString, GUILayout.Width(80));
         GUILayout.EndHorizontal();
         GUILayout.Space(10);
 
@@ -525,6 +700,33 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             cfgBaseInflationRate.Value = inflationVal;
         }
 
+        if (cfgMultiTeamPenaltyPercent != null
+            && float.TryParse(multiTeamPenaltyPercentString, out float mtPct))
+        {
+            if (mtPct < 0f) mtPct = 0f;
+            if (mtPct > 200f) mtPct = 200f;
+            cfgMultiTeamPenaltyPercent.Value = mtPct;
+        }
+
+        if (cfgDevDurationShort != null && float.TryParse(devDurationShortString, out float ddShort))
+        {
+            if (ddShort < 0.1f) ddShort = 0.1f;
+            if (ddShort > 5f) ddShort = 5f;
+            cfgDevDurationShort.Value = ddShort;
+        }
+        if (cfgDevDurationBalanced != null && float.TryParse(devDurationBalancedString, out float ddBal))
+        {
+            if (ddBal < 0.1f) ddBal = 0.1f;
+            if (ddBal > 5f) ddBal = 5f;
+            cfgDevDurationBalanced.Value = ddBal;
+        }
+        if (cfgDevDurationGenerous != null && float.TryParse(devDurationGenerousString, out float ddGen))
+        {
+            if (ddGen < 0.1f) ddGen = 0.1f;
+            if (ddGen > 5f) ddGen = 5f;
+            cfgDevDurationGenerous.Value = ddGen;
+        }
+
         if (timelineStrings != null)
         {
             for (int i = 0; i < 6; i++)
@@ -563,6 +765,13 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             cfgHardFloorWeeks[i].Value = defaultFloors[i];
             cfgHardCeilWeeks[i].Value = defaultCeils[i];
         }
+
+        if (cfgMultiTeamPenaltyEnabled != null) cfgMultiTeamPenaltyEnabled.Value = true;
+        if (cfgMultiTeamPenaltyPercent != null) cfgMultiTeamPenaltyPercent.Value = 18.0f;
+
+        if (cfgDevDurationShort != null)    cfgDevDurationShort.Value    = 0.65f;
+        if (cfgDevDurationBalanced != null) cfgDevDurationBalanced.Value = 0.85f;
+        if (cfgDevDurationGenerous != null) cfgDevDurationGenerous.Value = 1.00f;
 
         Config.Save();
         if (log != null) log.LogInfo("Subsidiary Mod config settings reset to default values.");
@@ -615,7 +824,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             string trendState   = GetTrendState(studio);
 
             // ── Compute multipliers ──────────────────────────────
-            float starMult     = CalcStarMultiplier(starsCount);
+            float starMult     = CalcStarMultiplier(starsCount, gameSize);
             float speedMult    = CalcSpeedMultiplier(speedLevel, isOrganic);
             float platformMult = CalcPlatformMultiplier(platformCount);
             float typeMult     = CalcProjectTypeMultiplier(game);
@@ -630,8 +839,6 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 cfgHardFloorWeeks[gameSize].Value,
                 cfgHardCeilWeeks[gameSize].Value);
 
-            int preVarianceWeeks = weeksInt; // Store for logging
-
             // ── Apply random variance AFTER clamping (can break floor/ceiling) ──
             if (cfgRandomVariance.Value)
             {
@@ -640,6 +847,21 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 weeksInt += varianceWeeks;
                 
                 // Ensure at least 1 week minimum
+                if (weeksInt < 1) weeksInt = 1;
+            }
+
+            // ── Apply Multi-Team Penalty (BEFORE ScaleSubsidiaryTimeline) ──
+            // Penalty adds overhead to the timeline when multiple projects run in parallel.
+            float mtMultNPC = CalcMultiTeamPenaltyMultiplier(studio);
+            if (mtMultNPC > 1.0001f)
+            {
+                int mtAdjusted = Mathf.RoundToInt(weeksInt * mtMultNPC);
+                if (log != null && cfgLogCalc.Value)
+                {
+                    log.LogInfo(string.Format("[Timeline NPC] Multi-Team Penalty: '{0}' active projects, mult={1:F2} -> {2}w -> {3}w",
+                        CountActiveProjects(studio), mtMultNPC, weeksInt, mtAdjusted));
+                }
+                weeksInt = mtAdjusted;
                 if (weeksInt < 1) weeksInt = 1;
             }
 
@@ -653,11 +875,11 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 log.LogInfo(string.Format(
                     "[Timeline NPC] Studio: '{0}' | Game: '{1}' (Size={2}, Type={3}) | " +
                     "Stars={4}/5 Speed={5} Plats={6} Trend={7} | " +
-                    "Base={8:F1}w x*={9:F2} s*={10:F2} p*={11:F2} t*={12:F2} g*={13:F2} => Clamped={14}w -> Final={15}w",
+                    "Base={8:F1}w x*={9:F2} s*={10:F2} p*={11:F2} t*={12:F2} g*={13:F2} => Final={14}w",
                     studio.GetName(), game.GetNameWithTag(), SizeLabels[gameSize], projectTypeLabel,
                     starsCount, speedLevel, platformCount, trendState,
                     baseWeeks, starMult, speedMult, platformMult, typeMult, trendMult,
-                    preVarianceWeeks, weeksInt));
+                    weeksInt));
             }
         }
     }
@@ -701,13 +923,6 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 return;
             }
 
-            // If Team Slots mod is managing this game, skip — it sets timing on slot assignment.
-            if (IsSlotManagedByTeamSlots(studio, game))
-            {
-                if (log != null) log.LogInfo("[Timeline] SetNewGameInWeeks: game is in a Team Slot, skipping vanilla override.");
-                return;
-            }
-
             // Get actual remaining/total weeks (vanilla path only)
             GetGameWeeks(studio, game, out float remaining, out float total);
 
@@ -728,7 +943,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             string trendState   = GetTrendState(studio);
 
             // ── Compute multipliers ──────────────────────────────
-            float starMult     = CalcStarMultiplier(starsCount);
+            float starMult     = CalcStarMultiplier(starsCount, gameSize);
             float speedMult    = CalcSpeedMultiplier(speedLevel, isOrganic);
             float platformMult = CalcPlatformMultiplier(platformCount);
             float typeMult     = CalcProjectTypeMultiplier(game);
@@ -743,8 +958,6 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 cfgHardFloorWeeks[gameSize].Value,
                 cfgHardCeilWeeks[gameSize].Value);
 
-            int preVarianceWeeks = weeksInt; // Store for logging
-
             // ── Apply random variance AFTER clamping (can break floor/ceiling) ──
             if (cfgRandomVariance.Value)
             {
@@ -753,6 +966,20 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 weeksInt += varianceWeeks;
                 
                 // Ensure at least 1 week minimum
+                if (weeksInt < 1) weeksInt = 1;
+            }
+
+            // ── Apply Multi-Team Penalty (BEFORE ScaleSubsidiaryTimeline) ──
+            float mtMultFB = CalcMultiTeamPenaltyMultiplier(studio);
+            if (mtMultFB > 1.0001f)
+            {
+                int mtAdjusted = Mathf.RoundToInt(weeksInt * mtMultFB);
+                if (log != null && cfgLogCalc.Value)
+                {
+                    log.LogInfo(string.Format("[Timeline Fallback] Multi-Team Penalty: '{0}' active projects, mult={1:F2} -> {2}w -> {3}w",
+                        CountActiveProjects(studio), mtMultFB, weeksInt, mtAdjusted));
+                }
+                weeksInt = mtAdjusted;
                 if (weeksInt < 1) weeksInt = 1;
             }
 
@@ -766,11 +993,11 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 log.LogInfo(string.Format(
                     "[Timeline Fallback] Studio: '{0}' | Game: '{1}' (Size={2}, Type={3}) | " +
                     "Stars={4}/5 Speed={5} Plats={6} Trend={7} | " +
-                    "Base={8:F1}w x*={9:F2} s*={10:F2} p*={11:F2} t*={12:F2} g*={13:F2} => Clamped={14}w -> Final={15}w",
+                    "Base={8:F1}w x*={9:F2} s*={10:F2} p*={11:F2} t*={12:F2} g*={13:F2} => Final={14}w",
                     studio.GetName(), game.GetNameWithTag(), SizeLabels[gameSize], projectTypeLabel,
                     starsCount, speedLevel, platformCount, trendState,
                     baseWeeks, starMult, speedMult, platformMult, typeMult, trendMult,
-                    preVarianceWeeks, weeksInt));
+                    weeksInt));
             }
         }
     }
@@ -822,7 +1049,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             
             string trendState   = GetTrendState(studio);
 
-            float starMult     = CalcStarMultiplier(starsCount);
+            float starMult     = CalcStarMultiplier(starsCount, gameSize);
             float speedMult    = CalcSpeedMultiplier(speedLevel, isOrganic);
             float platformMult = CalcPlatformMultiplier(platformCount);
             float typeMult     = CalcProjectTypeMultiplier(game);
@@ -859,11 +1086,11 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 log.LogInfo(string.Format(
                     "[Timeline CreateNewGame2 Postfix] Studio: '{0}' | Game: '{1}' (Size={2}, Type={3}) | " +
                     "Stars={4}/5 Speed={5} Plats={6} Trend={7} | " +
-                    "Base={8:F1}w x*={9:F2} s*={10:F2} p*={11:F2} t*={12:F2} g*={13:F2} r*={14:F2} => Final={15:F1}w -> Rounded={16}w | Remaining={17}w",
+                    "Base={8:F1}w x*={9:F2} s*={10:F2} p*={11:F2} t*={12:F2} g*={13:F2} r*={14:F2} => Final={15}w | Remaining={16}w",
                     studio.GetName(), game.GetNameWithTag(), SizeLabels[gameSize], projectTypeLabel,
                     starsCount, speedLevel, platformCount, trendState,
                     baseWeeks, starMult, speedMult, platformMult, typeMult, trendMult, randomMult,
-                    finalWeeks, weeksInt, studio.newGameInWeeks));
+                    weeksInt, studio.newGameInWeeks));
             }
         }
     }
@@ -1284,31 +1511,36 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
     }
 
     // ───────────────────────────────────────────────────────
-    //  Star Multiplier: Quadratic curve targeting low-star penalty
-    //  Formula: 1.0 + (5 - StarsCount)^2 * 0.15
+    //  Star Multiplier: Size-weighted linear penalty
+    //  Formula: 1.0 + (5 - StarsCount) * starWeights[GameSize]
+    //  Small games (B) get a mild penalty, large games (AAAA) get a harsh penalty.
+    //  Each star upgrade reduces the multiplier by weight.
     // ───────────────────────────────────────────────────────
-    private static float CalcStarMultiplier(int starsCount)
+    private static float CalcStarMultiplier(int starsCount, int gameSize)
     {
         int starsClamped = Mathf.Clamp(starsCount, 0, 5);
         int gap = 5 - starsClamped;
-        return 1.0f + (gap * gap) * 0.15f;
+        float[] starWeights = { 0.20f, 0.30f, 0.40f, 0.50f, 0.60f, 0.70f };
+        float weight = starWeights[Mathf.Clamp(gameSize, 0, 5)];
+        return 1.0f + gap * weight;
     }
 
     // ───────────────────────────────────────────────────────
-    //  Speed Multiplier: Normalize speed to 0-10, then scale
-    //  Formula: 1.30 - 0.05 * NormalizedSpeed
+    //  Speed Multiplier: speed 1 = ×1.0 baseline, speed 10 = ×0.50 max boost
+    //  Formula (organic): 1.0556 - 0.0556 * level
+    //  Formula (acquired): 1.1667 - 0.1667 * level
     // ───────────────────────────────────────────────────────
     private static float CalcSpeedMultiplier(int speedLevel, bool isOrganic)
     {
         if (isOrganic)
         {
-            int level = Mathf.Clamp(speedLevel, 0, 10);
-            return 1.50f - 0.10f * level;
+            int level = Mathf.Clamp(speedLevel, 1, 10);
+            return 1.0556f - 0.0556f * level;
         }
         else
         {
-            int level = Mathf.Clamp(speedLevel, 0, 4);
-            return 1.50f - 0.25f * level;
+            int level = Mathf.Clamp(speedLevel, 1, 4);
+            return 1.1667f - 0.1667f * level;
         }
     }
 
@@ -1538,6 +1770,62 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         }
     }
 
+    /// <summary>
+    /// Counts how many team-slots in this studio currently have an ACTIVE in-development project
+    /// (not helping another slot, and not idle).
+    /// Returns 0 if Team Slots is not loaded, or if the studio has no slot data.
+    /// </summary>
+    private static int CountActiveProjects(publisherScript studio)
+    {
+        if (studio == null || !IsTeamSlotsLoaded()) return 0;
+        try
+        {
+            SubsidiaryTeamSlotsPlugin.StudioSlotData slotData = SubsidiaryTeamSlotsPlugin.GetStudioSlotData(studio.myID);
+            if (slotData == null || slotData.slots == null) return 0;
+            int count = 0;
+            for (int i = 0; i < slotData.slots.Length; i++)
+            {
+                var slot = slotData.slots[i];
+                if (slot != null && slot.gameID != -1 && slot.isUnlocked)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+        catch (Exception ex)
+        {
+            if (log != null) log.LogWarning("CountActiveProjects failed: " + ex.Message);
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Returns the multi-team penalty multiplier for a given studio.
+    /// Multiplier = 1.0 + (activeCount - 1) * (cfgMultiTeamPenaltyPercent / 100).
+    /// Examples (default 18%):
+    ///   1 active project  → 1.00 (no penalty)
+    ///   2 active projects → 1.18 (+18% weeks)
+    ///   3 active projects → 1.36 (+36% weeks)
+    /// Returns 1.0 if penalty disabled, Team Slots not loaded, or 0-1 active projects.
+    /// </summary>
+    private static float CalcMultiTeamPenaltyMultiplier(publisherScript studio)
+    {
+        if (studio == null) return 1f;
+        if (cfgMultiTeamPenaltyEnabled == null || !cfgMultiTeamPenaltyEnabled.Value) return 1f;
+        if (cfgMultiTeamPenaltyPercent == null) return 1f;
+
+        int activeCount = CountActiveProjects(studio);
+        if (activeCount <= 1) return 1f;
+
+        float pct = cfgMultiTeamPenaltyPercent.Value;
+        if (pct < 0f) pct = 0f;
+        if (pct > 200f) pct = 200f; // hard cap to avoid runaway
+
+        float mult = 1.0f + (activeCount - 1) * (pct / 100f);
+        return mult;
+    }
+
     private static long GetOrganicSaleValue(publisherScript studio)
     {
         try
@@ -1619,11 +1907,24 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             var primarySlot = slotData.slots[slotIdx];
             if (primarySlot == null || primarySlot.gameID == -1) return 1f;
             
+            // Determine game size for size-weighted star multiplier
+            int gameSize = 2; // default to A if lookup fails
+            try
+            {
+                games gs = studio.games_ ?? UnityEngine.Object.FindObjectOfType<games>();
+                if (gs != null)
+                {
+                    gameScript g = FindGameByIDInGlobal(gs, primarySlot.gameID);
+                    if (g != null) gameSize = Mathf.Clamp(g.gameSize, 0, 5);
+                }
+            }
+            catch { }
+            
             bool isOrganic = IsOrganicStudio(studio);
             int primaryStars = (slotIdx == 0) ? studio.GetStarsAmount() : primarySlot.stars;
             int primarySpeed = (slotIdx == 0) ? studio.developmentSpeed : primarySlot.speed;
             
-            float pStarMult = CalcStarMultiplier(primaryStars);
+            float pStarMult = CalcStarMultiplier(primaryStars, gameSize);
             float pSpeedMult = CalcSpeedMultiplier(primarySpeed, isOrganic);
             float wPrimary = 1.0f / (pStarMult * pSpeedMult);
             if (wPrimary <= 0.001f) wPrimary = 0.001f;
@@ -1637,7 +1938,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 {
                     int hStars = (i == 0) ? studio.GetStarsAmount() : helperSlot.stars;
                     int hSpeed = (i == 0) ? studio.developmentSpeed : helperSlot.speed;
-                    float hStarMult = CalcStarMultiplier(hStars);
+                    float hStarMult = CalcStarMultiplier(hStars, gameSize);
                     float hSpeedMult = CalcSpeedMultiplier(hSpeed, isOrganic);
                     float wHelper = 1.0f / (hStarMult * hSpeedMult);
                     wHelpersSum += wHelper;
@@ -2046,7 +2347,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         string trendState = GetTrendState(studio);
 
         // Calculate multipliers
-        float starMult = CalcStarMultiplier(starsCount);
+        float starMult = CalcStarMultiplier(starsCount, gameSize);
         float speedMult = CalcSpeedMultiplier(speedLevel, isOrganic);
         float platformMult = CalcPlatformMultiplier(platformCount);
         float typeMult = CalcProjectTypeMultiplier(game);
@@ -2064,6 +2365,10 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
 
         // Note: We don't apply random variance here since this is a recalculation
         // Random variance should only be applied once at project start
+
+        float devMult = GetDevDurationMultiplier(studio);
+        weeksInt = Mathf.RoundToInt(weeksInt * devMult);
+        if (weeksInt < 1) weeksInt = 1;
 
         return Mathf.Max(1, weeksInt);
     }
@@ -2167,9 +2472,23 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         return null;
     }
 
+    private static float GetDevDurationMultiplier(publisherScript studio)
+    {
+        if (studio == null) return 1f;
+        int val = studio.tf_entwicklungsdauer;
+        if (val == 0) return cfgDevDurationShort    != null ? cfgDevDurationShort.Value    : 0.65f;
+        if (val == 1) return cfgDevDurationBalanced != null ? cfgDevDurationBalanced.Value : 0.85f;
+        if (val == 2) return cfgDevDurationGenerous != null ? cfgDevDurationGenerous.Value : 1.00f;
+        return 1f;
+    }
+
     private static void ScaleSubsidiaryTimeline(publisherScript studio, gameScript game, int weeksInt)
     {
         if (studio == null || game == null) return;
+
+        float devMult = GetDevDurationMultiplier(studio);
+        weeksInt = Mathf.RoundToInt(weeksInt * devMult);
+        if (weeksInt < 1) weeksInt = 1;
 
         GetGameWeeks(studio, game, out float wRemainingPrev, out float wOriginalPrev);
 
@@ -3698,7 +4017,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         int platformCount = CountPlatforms(game);
         string trendState = GetTrendState(studio);
 
-        float starMult = CalcStarMultiplier(starsCount);
+        float starMult = CalcStarMultiplier(starsCount, gameSize);
         float speedMult = CalcSpeedMultiplier(speedLevel, isOrganic);
         float platformMult = CalcPlatformMultiplier(platformCount);
         float typeMult = CalcProjectTypeMultiplier(game);
@@ -3786,6 +4105,13 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             int preStars;
             int preSpeed;
             bool callerProvidedPreValues = (preUpgradeStars >= 0);
+
+            // Guard: for Team Slots slot-specific upgrades, only recalculate the upgraded slot
+            if (callerProvidedPreValues && !preUpgradeIsStudioLevel && preUpgradeSlotIndex >= 0 && slotIdx != preUpgradeSlotIndex)
+            {
+                continue;
+            }
+
             if (callerProvidedPreValues)
             {
                 if (preUpgradeIsStudioLevel && slotIdx > 0)
@@ -3817,17 +4143,17 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             
             string trendState = GetTrendState(studio);
 
-            float preStarMult     = CalcStarMultiplier(preStars);
+            float preStarMult     = CalcStarMultiplier(preStars, gameSize);
             float preSpeedMult    = CalcSpeedMultiplier(preSpeed, isOrganic);
             float platformMult    = CalcPlatformMultiplier(platformCount);
             float typeMult        = CalcProjectTypeMultiplier(game);
             float trendMult       = CalcTrendMultiplier(trendState);
 
             float baseWeeks = cfgBaseMidpointWeeks[gameSize].Value;
-            float preUpgradeBaseWeeks = baseWeeks * preStarMult * preSpeedMult * platformMult * typeMult * trendMult;
-            
-            int preUpgradeClampedWeeks = Mathf.Clamp(
-                Mathf.RoundToInt(preUpgradeBaseWeeks),
+            float preFinalWeeks = baseWeeks * preStarMult * preSpeedMult * platformMult * typeMult * trendMult;
+
+            int preUpgradeValue = Mathf.Clamp(
+                Mathf.RoundToInt(preFinalWeeks),
                 cfgHardFloorWeeks[gameSize].Value,
                 cfgHardCeilWeeks[gameSize].Value);
 
@@ -3840,15 +4166,19 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 GetSlotSpecificStats(studio, game, ref currentStars, ref currentSpeed);
             }
 
-            float currentStarMult  = CalcStarMultiplier(currentStars);
+            float currentStarMult  = CalcStarMultiplier(currentStars, gameSize);
             float currentSpeedMult = CalcSpeedMultiplier(currentSpeed, isOrganic);
 
-            float newBaseWeeks = baseWeeks * currentStarMult * currentSpeedMult * platformMult * typeMult * trendMult;
+            float newFinalWeeks = baseWeeks * currentStarMult * currentSpeedMult * platformMult * typeMult * trendMult;
 
             int newClampedWeeks = Mathf.Clamp(
-                Mathf.RoundToInt(newBaseWeeks),
+                Mathf.RoundToInt(newFinalWeeks),
                 cfgHardFloorWeeks[gameSize].Value,
                 cfgHardCeilWeeks[gameSize].Value);
+
+            float devMult = GetDevDurationMultiplier(studio);
+            newClampedWeeks = Mathf.RoundToInt(newClampedWeeks * devMult);
+            if (newClampedWeeks < 1) newClampedWeeks = 1;
 
             int newTotalWeeks;
             float doneFraction;
@@ -3866,7 +4196,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
                 // Calculate the variance ratio that was applied to the original game:
                 // varianceRatio = actualTotal / baseCalculatedTotal
                 // This preserves any random variance the game received at start.
-                float originalVarianceRatio = wTotalPrev / (float)preUpgradeClampedWeeks;
+                float originalVarianceRatio = wTotalPrev / (float)preUpgradeValue;
 
                 // Apply the same variance ratio to the new base so variance is preserved
                 newTotalWeeks = Mathf.RoundToInt((float)newClampedWeeks * originalVarianceRatio);
@@ -3880,6 +4210,9 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
             if (newRemaining < 1f && doneFraction < 1.0f) newRemaining = 1f;
 
             SetGameWeeks(studio, game, newRemaining, (float)newTotalWeeks);
+            
+            // NEW: Recalculate dev points based on new week count (preserves progress %)
+            RecalculateGameDevPoints(game, newTotalWeeks, doneFraction);
 
             if (log != null)
             {
@@ -3901,6 +4234,7 @@ public class DynamicSubsidiaryTimelinePlugin : BaseUnityPlugin
         preUpgradeStars = -1;
         preUpgradeSpeed = -1;
         preUpgradeIsStudioLevel = false;
+        preUpgradeSlotIndex = -1;
     }
 
     [HarmonyPatch(typeof(Menu_W_FirmaAufwerten), "BUTTON_Yes")]
