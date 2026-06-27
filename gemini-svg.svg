@@ -1,0 +1,75 @@
+<!-- High-resolution, transparent SVG button matching the Mad Games Tycoon aesthetic with an ash-grey theme -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Centered Document Button - Ash Grey Edition</title>
+  
+  <defs>
+    <!-- Smooth 3D Ash Grey Radial Gradient for the Button Face -->
+    <radialGradient id="ashGreyGradient" cx="45%" cy="45%" r="60%" fx="35%" fy="35%">
+      <stop offset="0%" stop-color="#B0B9C1" />
+      <stop offset="50%" stop-color="#7A858F" />
+      <stop offset="85%" stop-color="#4E565E" />
+      <stop offset="100%" stop-color="#383E44" />
+    </radialGradient>
+
+    <!-- Glossy Top Bevel Highlight -->
+    <linearGradient id="bevelHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Drop Shadow Filter for Cartoon Depth -->
+    <filter id="cartoonShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="5" dy="8" stdDeviation="4" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+
+    <!-- Reusable Base Page Shape -->
+    <g id="singlePage">
+      <!-- Main Page Sheet with Thick Outline -->
+      <path d="M -45,-60 H 20 L 45,-35 V 60 H -45 Z" fill="#FFFFFF" stroke="#1A1A1A" stroke-width="6" stroke-linejoin="round" />
+      <!-- Folded Corner Triangle -->
+      <path d="M 20,-60 V -35 H 45 Z" fill="#D2D7DF" stroke="#1A1A1A" stroke-width="5" stroke-linejoin="round" />
+    </g>
+
+    <!-- Simulated Document Content Lines -->
+    <g id="pageLines">
+      <line x1="-30" y1="-25" x2="10" y2="-25" stroke="#4E565E" stroke-width="6" stroke-linecap="round" />
+      <line x1="-30" y1="-8" x2="30" y2="-8" stroke="#4E565E" stroke-width="6" stroke-linecap="round" />
+      <line x1="-30" y1="9" x2="20" y2="9" stroke="#4E565E" stroke-width="6" stroke-linecap="round" />
+      <line x1="-30" y1="26" x2="35" y2="26" stroke="#4E565E" stroke-width="6" stroke-linecap="round" />
+      <line x1="-30" y1="43" x2="5" y2="43" stroke="#4E565E" stroke-width="6" stroke-linecap="round" />
+    </g>
+  </defs>
+
+  <!-- 1. Outer Heavy Comic-Style Black Border -->
+  <circle cx="256" cy="256" r="236" fill="#111111" />
+
+  <!-- 2. Inner Rim Shadow for 3D Inset Depth -->
+  <circle cx="256" cy="256" r="224" fill="#25292D" />
+
+  <!-- 3. Main Ash Grey Button Body -->
+  <circle cx="256" cy="256" r="212" fill="url(#ashGreyGradient)" stroke="#2D3238" stroke-width="4" />
+
+  <!-- 4. Upper Pseudo-3D Glossy Light Reflection Rim -->
+  <path d="M 60,200 A 204,204 0 0,1 452,200" fill="none" stroke="url(#bevelHighlight)" stroke-width="8" stroke-linecap="round" opacity="0.4" />
+
+  <!-- 5. Centered Document Stack Group with Drop Shadow -->
+  <g filter="url(#cartoonShadow)" transform="translate(256, 256) scale(2.1)">
+    
+    <!-- BACK PAGE (Fanned Right/Back) -->
+    <g transform="translate(14, 8) rotate(14)">
+      <use href="#singlePage" fill="#CBD0D8" />
+    </g>
+    
+    <!-- MIDDLE PAGE (Fanned Slightly Right) -->
+    <g transform="translate(7, 4) rotate(7)">
+      <use href="#singlePage" fill="#E6EAEF" />
+    </g>
+    
+    <!-- FRONT PAGE (Perfectly Straight & Centered Core Layout) -->
+    <g transform="translate(-6, -4)">
+      <use href="#singlePage" fill="#FFFFFF" />
+      <use href="#pageLines" />
+    </g>
+
+  </g>
+</svg>

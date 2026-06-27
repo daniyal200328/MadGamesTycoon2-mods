@@ -6,7 +6,7 @@ $dotnet = "C:\tmp\dotnet\dotnet.exe"
 $csc = "C:\tmp\dotnet\sdk\8.0.422\Roslyn\bincore\csc.dll"
 $netstandardDir = "C:\tmp\dotnet\packs\NETStandard.Library.Ref\2.1.0\ref\netstandard2.1"
 $src = (Get-ChildItem -Path $PSScriptRoot -Filter "*.cs" | ForEach-Object { $_.FullName })
-$out = Join-Path $root "BepInEx\plugins\DynamicSubsidiaryTimeline.dll"
+$out = Join-Path $root "BepInEx\plugins\StudioDirector.dll"
 $managedDir = Join-Path $gameRoot "Mad Games Tycoon 2_Data\Managed"
 $bepCoreDir = Join-Path $gameRoot "BepInEx\core"
 $pluginsDir = Join-Path $root "BepInEx\plugins"
@@ -31,12 +31,12 @@ $refs += @(
     (Join-Path $managedDir "UnityEngine.InputModule.dll"),
     (Join-Path $managedDir "UnityEngine.TextRenderingModule.dll"),
     (Join-Path $managedDir "UnityEngine.UIModule.dll"),
-    (Join-Path $managedDir "UnityEngine.AnimationModule.dll"),
+    (Join-Path $managedDir "UnityEngine.ImageConversionModule.dll"),
     (Join-Path $managedDir "Assembly-CSharp.dll")
 )
 
-# Add optional soft dependencies if they exist
-foreach ($optionalPlugin in @("StudioDirector", "SubsidiaryTeams")) {
+# Optional soft dependencies
+foreach ($optionalPlugin in @("Subsidiary2", "DynamicSubsidiaryTimeline")) {
     $optionalDll = Join-Path $pluginsDir "$optionalPlugin.dll"
     if (Test-Path $optionalDll) {
         $refs += $optionalDll

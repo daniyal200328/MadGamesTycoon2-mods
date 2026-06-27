@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
+  <defs>
+    <!-- Main 3D Brown Gradient for the Button Face -->
+    <linearGradient id="buttonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#966142" />
+      <stop offset="40%" stop-color="#734429" />
+      <stop offset="100%" stop-color="#4a2814" />
+    </linearGradient>
+
+    <!-- Inner Bevel Highlight -->
+    <linearGradient id="bevelHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Page Shadow -->
+    <filter id="dropShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="2" dy="3" stdDeviation="1" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- 1. Outer Heavy Black Border -->
+  <circle cx="100" cy="100" r="92" fill="#141414" />
+
+  <!-- 2. Dark Inner Rim for Depth -->
+  <circle cx="100" cy="100" r="88" fill="#2d190e" />
+
+  <!-- 3. Main Button Body -->
+  <circle cx="100" cy="100" r="84" fill="url(#buttonGradient)" />
+
+  <!-- 4. Glossy / Bevel Overlay Edge -->
+  <circle cx="100" cy="100" r="80" fill="none" stroke="url(#bevelHighlight)" stroke-width="4" />
+  <circle cx="100" cy="102" r="82" fill="none" stroke="#000000" stroke-width="3" stop-opacity="0.3" />
+
+  <!-- 5. Document Stack Icon (Game Assignment) -->
+  <g filter="url(#dropShadow)">
+    
+    <!-- BACK PAGE (Rotated Right) -->
+    <g transform="translate(108, 82) rotate(15) translate(-35, -45)">
+      <path d="M 5,0 L 55,0 L 70,15 L 70,90 L 5,90 Z" fill="#e0e0e0" stroke="#23120b" stroke-width="5" stroke-linejoin="round" />
+      <!-- Folded Corner -->
+      <path d="M 55,0 L 55,15 L 70,15 Z" fill="#b0b0b0" stroke="#23120b" stroke-width="4" stroke-linejoin="round" />
+    </g>
+
+    <!-- MIDDLE PAGE (Rotated slightly Right) -->
+    <g transform="translate(102, 86) rotate(7) translate(-35, -45)">
+      <path d="M 5,0 L 55,0 L 70,15 L 70,90 L 5,90 Z" fill="#eaeaea" stroke="#23120b" stroke-width="5" stroke-linejoin="round" />
+      <!-- Folded Corner -->
+      <path d="M 55,0 L 55,15 L 70,15 Z" fill="#c4c4c4" stroke="#23120b" stroke-width="4" stroke-linejoin="round" />
+    </g>
+
+    <!-- FRONT PAGE (Main Document - Straight) -->
+    <g transform="translate(92, 92) translate(-35, -45)">
+      <!-- Page Base -->
+      <path d="M 5,0 L 55,0 L 70,15 L 70,90 L 5,90 Z" fill="#ffffff" stroke="#23120b" stroke-width="5" stroke-linejoin="round" />
+      <!-- Folded Corner -->
+      <path d="M 55,0 L 55,15 L 70,15 Z" fill="#dcdcdc" stroke="#23120b" stroke-width="4" stroke-linejoin="round" />
+      
+      <!-- Tycoon Style UI lines (Simulated Text / Game Specs) -->
+      <line x1="15" y1="25" x2="55" y2="25" stroke="#5c4335" stroke-width="5" stroke-linecap="round" />
+      <line x1="15" y1="38" x2="45" y2="38" stroke="#5c4335" stroke-width="5" stroke-linecap="round" />
+      <line x1="15" y1="51" x2="55" y2="51" stroke="#5c4335" stroke-width="5" stroke-linecap="round" />
+      <line x1="15" y1="64" x2="50" y2="64" stroke="#5c4335" stroke-width="5" stroke-linecap="round" />
+      <line x1="15" y1="77" x2="35" y2="77" stroke="#5c4335" stroke-width="5" stroke-linecap="round" />
+    </g>
+    
+  </g>
+</svg>
